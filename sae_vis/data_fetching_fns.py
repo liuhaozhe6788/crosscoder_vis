@@ -12,7 +12,7 @@ from rich import print as rprint
 from rich.table import Table
 from torch import Tensor
 from tqdm.auto import tqdm
-from transformer_lens import HookedTransformer, utils
+from nnsight import LanguageModel
 
 from sae_vis.data_config_classes import (
     SaeVisConfig,
@@ -34,7 +34,7 @@ from sae_vis.data_storing_fns import (
     SequenceMultiGroupData,
 )
 from sae_vis.model_fns import (
-    CrossCoder,
+    CrossCoder_vis,
     LanguageModelWrapper,
     to_resid_dir,
 )
@@ -56,8 +56,8 @@ def compute_feat_acts(
     model_A_acts: Float[Tensor, "batch seq d_in"],
     model_B_acts: Float[Tensor, "batch seq d_in"],
     feature_idx: list[int],
-    encoder: CrossCoder,
-    encoder_B: CrossCoder | None = None,
+    encoder: CrossCoder_vis,
+    encoder_B: CrossCoder_vis | None = None,
     corrcoef_neurons: RollingCorrCoef | None = None,
     corrcoef_encoder: RollingCorrCoef | None = None,
     corrcoef_encoder_B: RollingCorrCoef | None = None,
@@ -464,8 +464,8 @@ def parse_feature_data(
 
 @torch.inference_mode()
 def _get_feature_data(
-    encoder: CrossCoder,
-    encoder_B: CrossCoder | None,
+    encoder: CrossCoder_vis,
+    encoder_B: CrossCoder_vis | None,
     model_A: LanguageModelWrapper,
     model_B: LanguageModelWrapper,
     texts: list[str],
@@ -620,12 +620,12 @@ def _get_feature_data(
 
 @torch.inference_mode()
 def get_feature_data(
-    encoder: CrossCoder,
+    encoder: CrossCoder_vis,
     model_A: LanguageModel,
     model_B: LanguageModel,
     texts: list[str],
     cfg: SaeVisConfig,
-    encoder_B: CrossCoder | None = None,
+    encoder_B: CrossCoder_vis | None = None,
 ) -> SaeVisData:
     """
     This is the main function which users will run to generate the feature visualization data. It batches this
@@ -1162,7 +1162,7 @@ def get_prompt_data(
     # ! Boring setup code
     feature_idx = list(sae_vis_data.feature_data_dict.keys())
     encoder = sae_vis_data.encoder
-    assert isinstance(encoder, CrossCoder)
+    assert isinstance(encoder, CrossCoder_vis)
     model = sae_vis_data.model
     assert isinstance(model, HookedTransformer)
     cfg = sae_vis_data.cfg

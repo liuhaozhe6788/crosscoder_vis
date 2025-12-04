@@ -30,7 +30,7 @@ from sae_vis.html_fns import (
     uColorMap,
 )
 from sae_vis.model_fns import (
-    CrossCoder,
+    CrossCoder_vis,
     CrossCoderConfig,
 )
 from sae_vis.utils_fns import (
@@ -1091,8 +1091,8 @@ class SaeVisData:
 
     model_A: LanguageModel | None = None
     model_B: LanguageModel | None = None
-    encoder: CrossCoder | None = None
-    encoder_B: CrossCoder | None = None
+    encoder: CrossCoder_vis | None = None
+    encoder_B: CrossCoder_vis | None = None
 
     def update(self, other: "SaeVisData") -> None:
         """
@@ -1113,7 +1113,7 @@ class SaeVisData:
         model_B: LanguageModel,
         texts: list[str],
         cfg: SaeVisConfig,
-        encoder_B: CrossCoder | None = None,
+        encoder_B: CrossCoder_vis | None = None,
     ) -> "SaeVisData":
         from sae_vis.data_fetching_fns import get_feature_data
 
@@ -1142,10 +1142,7 @@ class SaeVisData:
             encoder_B=encoder_B,
         )
         sae_vis_data.cfg = cfg
-        sae_vis_data.model_A = model_A
-        sae_vis_data.model_B = model_B
-        sae_vis_data.encoder = encoder_wrapper
-        sae_vis_data.encoder_B = encoder_B
+        sae_vis_data.tokenizer = model_A.tokenizer
 
         return sae_vis_data
 
@@ -1174,9 +1171,8 @@ class SaeVisData:
         )
 
         # Get tokenize function (we only need to define it once)
-        assert self.model_A is not None
-        assert self.model_A.tokenizer is not None
-        decode_fn = get_decode_html_safe_fn(self.model_A.tokenizer)
+        assert self.tokenizer is not None
+        decode_fn = get_decode_html_safe_fn(self.tokenizer)
 
         # Create iterator
         iterator = list(self.feature_data_dict.items())
@@ -1240,7 +1236,7 @@ class SaeVisData:
         ), "No active features found for any tokens in this prompt."
 
         # Get all possible values for dropdowns
-        str_toks = self.model.tokenizer.tokenize(prompt)  # type: ignore
+        str_toks = self.tokenizer.tokenize(prompt)  # type: ignore
         str_toks = [
             t.replace("|", "│") for t in str_toks
         ]  # vertical line -> pipe (hacky, so key splitting on | works)
@@ -1266,9 +1262,8 @@ class SaeVisData:
             )
 
         # Get tokenize function (we only need to define it once)
-        assert self.model is not None
-        assert self.model.tokenizer is not None
-        decode_fn = get_decode_html_safe_fn(self.model.tokenizer)
+        assert self.tokenizer is not None
+        decode_fn = get_decode_html_safe_fn(self.tokenizer)
 
         # For each (metric, seqpos) object, we merge the prompt-centric views of each of the top features, then we merge
         # these all together into our HTML_OBJ
@@ -1338,8 +1333,8 @@ class SaeVisData:
         filename: str | Path,
         cfg: SaeVisConfig,
         model: HookedTransformer,
-        encoder: CrossCoder,
-        encoder_B: CrossCoder,
+        encoder: CrossCoder_vis,
+        encoder_B: CrossCoder_vis,
     ) -> "SaeVisData":
         """
         Loads an SaeVisData instance from JSON file. The config, model & encoder arguments must be user-supplied.

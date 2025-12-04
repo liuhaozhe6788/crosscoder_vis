@@ -35,7 +35,7 @@ class CrossCoderConfig:
             self.dict_mult = self.d_hidden // self.d_in
 
 
-class CrossCoder(nn.Module):
+class CrossCoder_vis(nn.Module):
     def __init__(self, cfg: CrossCoderConfig):
         super().__init__()
         self.cfg = cfg
