@@ -1332,7 +1332,7 @@ class SaeVisData:
         cls,
         filename: str | Path,
         cfg: SaeVisConfig,
-        model: HookedTransformer,
+        model: LanguageModel,
         encoder: CrossCoder_vis,
         encoder_B: CrossCoder_vis,
     ) -> "SaeVisData":

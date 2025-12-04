@@ -2,19 +2,20 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from typing import Optional, Union
-from huggingface_hub import hf_hub_download, notebook_login
+from huggingface_hub import hf_hub_download, login
 import json
 import einops
+import os
 from typing import NamedTuple
 from sae_vis.data_config_classes import SaeVisConfig
 from nnsight import LanguageModel
 
-
-notebook_login()
+HF_TOKEN = os.getenv("HF_TOKEN")
+login(HF_TOKEN)
 torch.set_grad_enabled(False)
 
-base_model = LanguageModel('gemma2-2-2b', device_map='cuda:0')
-chat_model = LanguageModel('gemma2-2-2b-it', device_map='cuda:0')
+base_model = LanguageModel('google/gemma-2-2b', device_map='cuda:0', dtype=torch.bfloat16)
+chat_model = LanguageModel('google/gemma-2-2b-it', device_map='cuda:0', dtype=torch.bfloat16)
 
 all_texts = [""""content": "Give me an introduction over 200 words for ShangHai BMG Chemical Co., Ltd, a chemical company in Room 602, no 291 sikai road shanghai Shanghai,China",
 "role": "user"
@@ -207,7 +208,7 @@ def fold_activation_scaling_factor(cross_coder, base_scaling_factor, chat_scalin
 
 folded_cross_coder = fold_activation_scaling_factor(folded_cross_coder, base_estimated_scaling_factor, chat_estimated_scaling_factor)
 
-encoder_cfg = CrossCoderConfig(d_in=base_model.cfg.d_model, d_hidden=cross_coder.cfg["dict_size"], apply_b_dec_to_input=False)
+encoder_cfg = CrossCoderConfig(d_in=base_model.config.hidden_size, d_hidden=cross_coder.cfg["dict_size"], apply_b_dec_to_input=False)
 sae_vis_cross_coder = CrossCoder_vis(encoder_cfg)
 sae_vis_cross_coder.load_state_dict(folded_cross_coder.state_dict())
 sae_vis_cross_coder = sae_vis_cross_coder.to("cuda:0")

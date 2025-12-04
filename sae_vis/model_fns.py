@@ -149,7 +149,7 @@ class LanguageModelWrapper(nn.Module):
 
     @property
     def W_U(self):
-        return self.model.W_U
+        return self.model.model.embed_tokens.weight.T
 
 def to_resid_dir(dir: Float[Tensor, "feats d_in"], model: LanguageModelWrapper):
     """

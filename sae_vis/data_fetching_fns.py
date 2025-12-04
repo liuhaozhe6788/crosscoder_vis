@@ -85,7 +85,7 @@ def compute_feat_acts(
     # Get the feature act direction by indexing encoder.W_enc, and the bias by indexing encoder.b_enc
     
     model_acts = torch.stack([model_A_acts, model_B_acts], dim=0) # [n_layers, batch, seq, d_in]
-    model_acts = model_acts[:, :, 1:, :] # drop bos
+    # model_acts = model_acts[:, :, 1:, :] # drop bos
     
     feature_act_dir = encoder.W_enc[:, :, feature_idx]  # (n_layers, d_in, feats)
     feature_bias = encoder.b_enc[feature_idx]  # (feats,)
