@@ -430,9 +430,9 @@ KEY_LAYOUT_VIS = """Key:
 
 
 SAE_CONFIG_DICT = dict(
-    hook_point="The hook point to use for the SAE",
+    hook_layer="The hook layer to use for the SAE",
     features="The set of features which we'll be gathering data for. If an integer, we only get data for 1 feature",
-    minibatch_size_tokens="The minibatch size we'll use to split up the full batch during forward passes, to avoid \
+    minibatch_size_texts="The minibatch size we'll use to split up the full batch during forward passes, to avoid \
 OOMs.",
     minibatch_size_features="The feature minibatch size we'll use to split up our features, to avoid OOM errors",
     seed="Random seed, for reproducibility (e.g. sampling quantiles)",
@@ -444,10 +444,10 @@ OOMs.",
 @dataclass
 class SaeVisConfig:
     # Data
-    hook_point: str | None = None
+    hook_layer: int | None = None
     features: int | Iterable[int] | None = None
     minibatch_size_features: int = 256
-    minibatch_size_tokens: int = 64
+    minibatch_size_texts: int = 1
 
     # Vis
     feature_centric_layout: SaeVisLayoutConfig = field(
@@ -467,7 +467,7 @@ class SaeVisConfig:
     def __post_init__(self):
         assert (
             self.batch_size is None
-        ), "The `batch_size` parameter has been depreciated. Please use `minibatch_size_tokens` instead."
+        ), "The `batch_size` parameter has been depreciated. Please use `minibatch_size_texts` instead."
 
     def to_dict(self) -> dict[str, Any]:
         """Used for type hinting (the actual method comes from the `dataclass_json` decorator)."""

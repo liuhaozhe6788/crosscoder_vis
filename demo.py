@@ -1,10 +1,10 @@
 from sae_vis.data_config_classes import SaeVisConfig
 test_feature_idx = [2325,12698,15]
 sae_vis_config = SaeVisConfig(
-    hook_point = folded_cross_coder.cfg["hook_point"],
+    hook_layer = 16,
     features = test_feature_idx,
     verbose = True,
-    minibatch_size_tokens=4,
+    minibatch_size_texts=1,
     minibatch_size_features=16,
 )
 
@@ -14,7 +14,7 @@ sae_vis_data = SaeVisData.create(
     encoder_B = None,
     model_A = base_model,
     model_B = chat_model,
-    tokens = all_tokens[:128], # in practice, better to use more data
+    texts = all_texts[:128], # in practice, better to use more data
     cfg = sae_vis_config,
 )
 

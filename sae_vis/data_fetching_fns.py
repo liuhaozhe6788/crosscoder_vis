@@ -35,7 +35,7 @@ from sae_vis.data_storing_fns import (
 )
 from sae_vis.model_fns import (
     CrossCoder,
-    TransformerLensWrapper,
+    LanguageModelWrapper,
     to_resid_dir,
 )
 from sae_vis.utils_fns import (
@@ -137,7 +137,7 @@ def compute_feat_acts(
 
 @torch.inference_mode()
 def parse_feature_data(
-    tokens: Int[Tensor, "batch seq"],
+    texts: list[str],
     feature_indices: int | list[int],
     all_feat_acts: Float[Tensor, "... feats"],
     feature_resid_dir_A: Float[Tensor, "feats d_model"],
@@ -159,7 +159,7 @@ def parse_feature_data(
     need the models.
 
     Args:
-        tokens: Int[Tensor, "batch seq"]
+        texts: list[str]
             The tokens we'll be using to get the feature activations.
 
         feature_indices: Union[int, list[int]]
@@ -466,9 +466,9 @@ def parse_feature_data(
 def _get_feature_data(
     encoder: CrossCoder,
     encoder_B: CrossCoder | None,
-    model_A: TransformerLensWrapper,
-    model_B: TransformerLensWrapper,
-    tokens: Int[Tensor, "batch seq"],
+    model_A: LanguageModelWrapper,
+    model_B: LanguageModelWrapper,
+    texts: list[str],
     feature_indices: int | list[int],
     cfg: SaeVisConfig,
     progress: list[tqdm] | None = None,
@@ -488,11 +488,11 @@ def _get_feature_data(
             The encoder we'll be using as a reference (i.e. finding the B-features with the highest correlation). This
             is only necessary if we're generating the left-hand tables (i.e. cfg.include_left_tables=True).
 
-        model: TransformerLensWrapper
-            The model we'll be using to get the feature activations. It's a wrapping of the base TransformerLens model.
+        model: LanguageModelWrapper
+            The model we'll be using to get the feature activations. It's a wrapping of the base LanguageModel model.
 
-        tokens: Int[Tensor, "batch seq"]
-            The tokens we'll be using to get the feature activations.
+        texts: list[str]
+            The texts we'll be using to get the feature activations.
 
         feature_indices: Union[int, list[int]]
             The features we're actually computing. These might just be a subset of the model's full features.
@@ -528,12 +528,11 @@ def _get_feature_data(
         feature_indices = [feature_indices]
 
     # Get tokens into minibatches, for the fwd pass
-    token_minibatches = (
-        (tokens,)
-        if cfg.minibatch_size_tokens is None
-        else tokens.split(cfg.minibatch_size_tokens)
+    text_minibatches = (
+        (texts,)
+        if cfg.minibatch_size_texts is None
+        else [texts[i:i+cfg.minibatch_size_texts] for i in range(0, len(texts), cfg.minibatch_size_texts)]
     )
-    token_minibatches = [tok.to(device) for tok in token_minibatches]
 
     # ! Data setup code (defining the main objects we'll eventually return, for each of 5 possible vis components)
 
@@ -558,7 +557,7 @@ def _get_feature_data(
 
     # ! Compute & concatenate together all feature activations & post-activation function values
 
-    for minibatch in token_minibatches:
+    for minibatch in text_minibatches:
         # Fwd pass, get model activations
         t0 = time.time()
         residual_A, model_A_acts = model_A.forward(minibatch, return_logits=False)
@@ -594,7 +593,7 @@ def _get_feature_data(
 
     # ! Use the data we've collected to make a MultiFeatureData object
     sae_vis_data, _time_logs = parse_feature_data(
-        tokens=tokens,
+        texts=texts,
         feature_indices=feature_indices,
         all_feat_acts=all_feat_acts,
         feature_resid_dir_A=feature_resid_dir_A,
@@ -622,9 +621,9 @@ def _get_feature_data(
 @torch.inference_mode()
 def get_feature_data(
     encoder: CrossCoder,
-    model_A: HookedTransformer,
-    model_B: HookedTransformer,
-    tokens: Int[Tensor, "batch seq"],
+    model_A: LanguageModel,
+    model_B: LanguageModel,
+    texts: list[str],
     cfg: SaeVisConfig,
     encoder_B: CrossCoder | None = None,
 ) -> SaeVisData:
@@ -662,13 +661,13 @@ def get_feature_data(
         for x in torch.tensor(features_list).split(cfg.minibatch_size_features)
     ]
     # Calculate how many minibatches of tokens there will be (for the progress bar)
-    n_token_batches = (
+    n_text_batches = (
         1
-        if (cfg.minibatch_size_tokens is None)
-        else math.ceil(len(tokens) / cfg.minibatch_size_tokens)
+        if (cfg.minibatch_size_texts is None)
+        else math.ceil(len(texts) / cfg.minibatch_size_texts)
     )
     # Get the denominator for each of the 2 progress bars
-    totals = (n_token_batches * len(feature_batches), len(features_list))
+    totals = (n_text_batches * len(feature_batches), len(features_list))
 
     # Optionally add two progress bars (one for the forward passes, one for getting the sequence data)
     if cfg.verbose:
@@ -681,25 +680,28 @@ def get_feature_data(
 
     # If the model is from TransformerLens, we need to apply a wrapper to it for standardization
     assert isinstance(
-        model_A, HookedTransformer
-    ), "Error: non-HookedTransformer models are not yet supported."
+        model_A, LanguageModel
+    ), "Error: non-LanguageModel models are not yet supported."
     assert isinstance(
-        cfg.hook_point, str
-    ), f"Error: cfg.hook_point must be a string, got {cfg.hook_point}"
-    model_A_wrapper = TransformerLensWrapper(model_A, cfg.hook_point)
+        cfg.hook_layer, int
+    ), f"Error: cfg.hook_layer must be an integer, got {cfg.hook_layer}"
+    #### The function to modify the model_A_wrapper given the LanguageModel object
+    model_A_wrapper = LanguageModelWrapper(model_A, cfg.hook_layer)
     
     assert isinstance(
-        model_B, HookedTransformer
-    ), "Error: non-HookedTransformer models are not yet supported."
+        model_B, LanguageModel
+    ), "Error: non-LanguageModel models are not yet supported."
     assert isinstance(
-        cfg.hook_point, str
-    ), f"Error: cfg.hook_point must be a string, got {cfg.hook_point}"
-    model_B_wrapper = TransformerLensWrapper(model_B, cfg.hook_point)
+        cfg.hook_layer, int
+    ), f"Error: cfg.hook_layer must be an integer, got {cfg.hook_layer}"
+    #### The function to modify the model_B_wrapper given the LanguageModel object
+    model_B_wrapper = LanguageModelWrapper(model_B, cfg.hook_layer)
 
     # For each batch of features: get new data and update global data storage objects
     for features in feature_batches:
+        #### The function to modify given the modified model_A_wrapper and model_B_wrapper
         new_feature_data, new_time_logs = _get_feature_data(
-            encoder, encoder_B, model_A_wrapper, model_B_wrapper, tokens, features, cfg, progress
+            encoder, encoder_B, model_A_wrapper, model_B_wrapper, texts, features, cfg, progress
         )
         sae_vis_data.update(new_feature_data)
         for key, value in new_time_logs.items():
@@ -1170,7 +1172,7 @@ def get_prompt_data(
     tokens = model.tokenizer.encode(prompt, return_tensors="pt").to(device)  # type: ignore
     assert isinstance(tokens, torch.Tensor)
 
-    model_wrapped = TransformerLensWrapper(model, cfg.hook_point)
+    model_wrapped = LanguageModelWrapper(model, cfg.hook_point)
 
     feature_act_dir = encoder.W_enc[:, feature_idx]  # [d_in feats]
     feature_out_dir = encoder.W_dec[feature_idx]  # [feats d_in]

@@ -10,7 +10,7 @@ from dataclasses_json import dataclass_json
 from jaxtyping import Int
 from torch import Tensor, nn
 from tqdm.auto import tqdm
-from transformer_lens import HookedTransformer
+from nnsight import LanguageModel
 
 from sae_vis.data_config_classes import (
     ActsHistogramConfig,
@@ -1089,8 +1089,8 @@ class SaeVisData:
     feature_stats: FeatureStatistics = field(default_factory=FeatureStatistics)
     cfg: SaeVisConfig = field(default_factory=SaeVisConfig)
 
-    model_A: HookedTransformer | None = None
-    model_B: HookedTransformer | None = None
+    model_A: LanguageModel | None = None
+    model_B: LanguageModel | None = None
     encoder: CrossCoder | None = None
     encoder_B: CrossCoder | None = None
 
@@ -1109,9 +1109,9 @@ class SaeVisData:
     def create(
         cls,
         encoder: nn.Module,
-        model_A: HookedTransformer,
-        model_B: HookedTransformer,
-        tokens: Int[Tensor, "batch seq"],
+        model_A: LanguageModel,
+        model_B: LanguageModel,
+        texts: list[str],
         cfg: SaeVisConfig,
         encoder_B: CrossCoder | None = None,
     ) -> "SaeVisData":
@@ -1132,11 +1132,12 @@ class SaeVisData:
         # else:
         encoder_wrapper = encoder
 
+        ## The function to modify the model_A and model_B to be LanguageModel objects
         sae_vis_data = get_feature_data(
             encoder=encoder_wrapper,
             model_A=model_A,
             model_B=model_B,
-            tokens=tokens,
+            texts=texts,
             cfg=cfg,
             encoder_B=encoder_B,
         )
