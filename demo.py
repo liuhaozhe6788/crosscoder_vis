@@ -9,25 +9,30 @@ import os
 from typing import NamedTuple
 from sae_vis.data_config_classes import SaeVisConfig
 from nnsight import LanguageModel
+import pandas as pd
+
 
 HF_TOKEN = os.getenv("HF_TOKEN")
 login(HF_TOKEN)
 torch.set_grad_enabled(False)
 
-base_model = LanguageModel('google/gemma-2-2b', device_map='cuda:0', dtype=torch.bfloat16)
-chat_model = LanguageModel('google/gemma-2-2b-it', device_map='cuda:0', dtype=torch.bfloat16)
+base_model = LanguageModel('mistralai/Mistral-7B-Instruct-v0.3', device_map='cuda:0', dtype=torch.bfloat16)
+chat_model = LanguageModel('liuhaozhe6788/mistralai_Mistral-7B-Instruct-v0.3-FinQA-lora', device_map='cuda:0', dtype=torch.bfloat16)
 
-all_texts = [""""content": "Give me an introduction over 200 words for ShangHai BMG Chemical Co., Ltd, a chemical company in Room 602, no 291 sikai road shanghai Shanghai,China",
-"role": "user"
-},
-{
-"content": "Shanghai BMG Chemical Co., Ltd is a chemical company located in Room 602, no 291 Sikai Road, Shanghai, China. The company was founded in 1988 and has since grown to become a leading producer of specialty chemicals in the region. BMG Chemical is committed to providing high-quality products and services to its customers in a wide range of industries, including pharmaceuticals, electronics, and automotive.\n\nThe company's product portfolio includes a wide range of chemicals, including intermediates, active pharmaceutical ingredients, and specialty chemicals. BMG Chemical's state-of-the-art manufacturing facilities and experienced team of chemists enable the company to produce a wide range of chemicals with high purity and consistency.\n\nIn addition to its focus on product innovation, BMG Chemical places a strong emphasis on customer service. The company provides its customers with timely delivery, customized solutions, and technical support to help them achieve their goals.\n\nOverall, Shanghai BMG Chemical is a well-established chemical company with a reputation for producing high-quality products and providing excellent customer service. Its commitment to innovation and customer service has helped the company establish a strong position in the chemical industry and maintain its position as a leading producer of specialty chemicals in the region.",
-"role": "assistant"""]
+def prepare_text_data():
+    data = pd.read_csv("../data/finqa_test_generated_filtered.csv")
+    full_text_data = data.apply(lambda x: x["prompt"] + x["generated_code"], axis=1)
+
+    all_text_data = full_text_data.tolist()
+    return all_text_data
+
+all_texts = prepare_text_data()
+
 
 from sae_vis.model_fns import CrossCoderConfig, CrossCoder_vis
 
-base_estimated_scaling_factor = 0.2835
-chat_estimated_scaling_factor = 0.2533
+base_estimated_scaling_factor = 27.489933013916016
+chat_estimated_scaling_factor = 27.12582778930664
 
 DTYPES = {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16}
 
@@ -146,8 +151,7 @@ class CrossCoder_demo(nn.Module):
     @classmethod
     def load_from_hf(
         cls,
-        repo_id: str = "ckkissane/crosscoder-gemma-2-2b-model-diff",
-        path: str = "blocks.14.hook_resid_pre",
+        repo_id: str = "liuhaozhe6788/crosscoder-model-diff-mistral-7b-instruct-v0.3_finQA_lora",
         device: Optional[Union[str, torch.device]] = None
     ) -> "CrossCoder_demo":
         """
@@ -166,11 +170,11 @@ class CrossCoder_demo(nn.Module):
         # Download config and weights
         config_path = hf_hub_download(
             repo_id=repo_id,
-            filename=f"{path}/cfg.json"
+            filename=f"cfg.json"
         )
         weights_path = hf_hub_download(
             repo_id=repo_id,
-            filename=f"{path}/cc_weights.pt"
+            filename=f"model.pt"
         )
 
         # Load config
@@ -186,7 +190,7 @@ class CrossCoder_demo(nn.Module):
 
         # Load weights
         state_dict = torch.load(weights_path, map_location=cfg["device"])
-        instance.load_state_dict(state_dict)
+        instance.load_state_dict(state_dict["model_state_dict"])
 
         return instance
 

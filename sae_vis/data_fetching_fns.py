@@ -85,7 +85,7 @@ def compute_feat_acts(
     # Get the feature act direction by indexing encoder.W_enc, and the bias by indexing encoder.b_enc
     
     model_acts = torch.stack([model_A_acts, model_B_acts], dim=0) # [n_layers, batch, seq, d_in]
-    # model_acts = model_acts[:, :, 1:, :] # drop bos
+    model_acts = model_acts[:, :, 1:, :] # drop bos
     
     feature_act_dir = encoder.W_enc[:, :, feature_idx]  # (n_layers, d_in, feats)
     feature_bias = encoder.b_enc[feature_idx]  # (feats,)
@@ -137,7 +137,7 @@ def compute_feat_acts(
 
 @torch.inference_mode()
 def parse_feature_data(
-    texts: list[str],
+    tokens: Int[Tensor, "batch seq"],
     feature_indices: int | list[int],
     all_feat_acts: Float[Tensor, "... feats"],
     feature_resid_dir_A: Float[Tensor, "feats d_model"],
@@ -159,7 +159,7 @@ def parse_feature_data(
     need the models.
 
     Args:
-        texts: list[str]
+        tokens: Int[Tensor, "batch seq"]
             The tokens we'll be using to get the feature activations.
 
         feature_indices: Union[int, list[int]]
@@ -253,7 +253,6 @@ def parse_feature_data(
                 tensor=feature_out_dir, k=layout.feature_tables_cfg.n_rows, largest=True
             )
             feature_out_l1_norm = feature_out_dir.abs().sum(dim=-1, keepdim=True)
-            print(feature_out_l1_norm.shape)
             pct_of_l1: Arr = np.absolute(top3_neurons_aligned.values) / utils.to_numpy(
                 feature_out_l1_norm.float()
             )
@@ -527,6 +526,11 @@ def _get_feature_data(
     if isinstance(feature_indices, int):
         feature_indices = [feature_indices]
 
+    model_A.tokenizer.padding_side = "right"
+    
+    tokens = model_A.tokenizer.batch_encode_plus(texts, return_tensors="pt", padding=True)
+    tokens = tokens["input_ids"]
+    texts = model_A.tokenizer.batch_decode(tokens)
     # Get tokens into minibatches, for the fwd pass
     text_minibatches = (
         (texts,)
@@ -561,7 +565,7 @@ def _get_feature_data(
         # Fwd pass, get model activations
         t0 = time.time()
         residual_A, model_A_acts = model_A.forward(minibatch, return_logits=False)
-        residual_B, model_B_acts = model_B.forward(minibatch, return_logits=False)
+        _, model_B_acts = model_B.forward(minibatch, return_logits=False)
         time_logs["(2) Forward passes to gather model activations"] += time.time() - t0
 
         # Compute feature activations from this
@@ -581,7 +585,6 @@ def _get_feature_data(
         # Add these to the lists (we'll eventually concat)
         all_feat_acts.append(feat_acts)
         all_resid_post_A.append(residual_A) # TODO: Idk what this is used for
-        all_resid_post_B.append(residual_B)
         
         # Update the 1st progress bar (fwd passes & getting sequence data dominates the runtime of these computations)
         if progress is not None:
@@ -589,11 +592,12 @@ def _get_feature_data(
 
     all_feat_acts = torch.cat(all_feat_acts, dim=0)
     all_resid_post_A = torch.cat(all_resid_post_A, dim=0)
-    all_resid_post_B = torch.cat(all_resid_post_B, dim=0)
 
     # ! Use the data we've collected to make a MultiFeatureData object
+    tokens = model_A.tokenizer.batch_encode_plus(texts, return_tensors="pt", padding=True)
+    tokens = tokens["input_ids"]
     sae_vis_data, _time_logs = parse_feature_data(
-        texts=texts,
+        tokens=tokens,
         feature_indices=feature_indices,
         all_feat_acts=all_feat_acts,
         feature_resid_dir_A=feature_resid_dir_A,
@@ -949,259 +953,259 @@ def get_sequences_data(
     return SequenceMultiGroupData(sequence_groups_data)
 
 
-@torch.inference_mode()
-def parse_prompt_data(
-    tokens: Int[Tensor, "batch seq"],
-    str_toks: list[str],
-    sae_vis_data: SaeVisData,
-    feat_acts: Float[Tensor, "seq feats"],
-    feature_resid_dir: Float[Tensor, "feats d_model"],
-    resid_post: Float[Tensor, "seq d_model"],
-    W_U: Float[Tensor, "d_model d_vocab"],
-    feature_idx: list[int] | None = None,
-    num_top_features: int = 10,
-) -> dict[str, tuple[list[int], list[str]]]:
-    """
-    Gets data needed to create the sequences in the prompt-centric vis (displaying dashboards for the most relevant
-    features on a prompt).
+# @torch.inference_mode()
+# def parse_prompt_data(
+#     tokens: Int[Tensor, "batch seq"],
+#     str_toks: list[str],
+#     sae_vis_data: SaeVisData,
+#     feat_acts: Float[Tensor, "seq feats"],
+#     feature_resid_dir: Float[Tensor, "feats d_model"],
+#     resid_post: Float[Tensor, "seq d_model"],
+#     W_U: Float[Tensor, "d_model d_vocab"],
+#     feature_idx: list[int] | None = None,
+#     num_top_features: int = 10,
+# ) -> dict[str, tuple[list[int], list[str]]]:
+#     """
+#     Gets data needed to create the sequences in the prompt-centric vis (displaying dashboards for the most relevant
+#     features on a prompt).
 
-    This function exists so that prompt dashboards can be generated without using our CrossCoder or
-    TransformerLens(Wrapper) classes.
+#     This function exists so that prompt dashboards can be generated without using our CrossCoder or
+#     TransformerLens(Wrapper) classes.
 
-    Args:
-        tokens: Int[Tensor, "batch seq"]
-            The tokens we'll be using to get the feature activations. Note that we might not be using all of them; the
-            number used is determined by `fvp.total_batch_size`.
+#     Args:
+#         tokens: Int[Tensor, "batch seq"]
+#             The tokens we'll be using to get the feature activations. Note that we might not be using all of them; the
+#             number used is determined by `fvp.total_batch_size`.
 
-        str_toks:  list[str]
-            The tokens as a list of strings, so that they can be visualized in HTML.
+#         str_toks:  list[str]
+#             The tokens as a list of strings, so that they can be visualized in HTML.
 
-        sae_vis_data: SaeVisData
-             The object storing all data for each feature. We'll set each `feature_data.prompt_data` to the
-             data we get from `prompt`.
+#         sae_vis_data: SaeVisData
+#              The object storing all data for each feature. We'll set each `feature_data.prompt_data` to the
+#              data we get from `prompt`.
 
-        feat_acts: Float[Tensor, "seq feats"]
-            The activations values of the features across the sequence.
+#         feat_acts: Float[Tensor, "seq feats"]
+#             The activations values of the features across the sequence.
 
-        feature_resid_dir: Float[Tensor, "feats d_model"]
-            The directions that each feature writes to the residual stream.
+#         feature_resid_dir: Float[Tensor, "feats d_model"]
+#             The directions that each feature writes to the residual stream.
 
-        resid_post: Float[Tensor, "seq d_model"]
-            The activations of the final layer of the model before the unembed.
+#         resid_post: Float[Tensor, "seq d_model"]
+#             The activations of the final layer of the model before the unembed.
 
-        W_U: Float[Tensor, "d_model d_vocab"]
-            The model's unembed weights for the logit lens.
+#         W_U: Float[Tensor, "d_model d_vocab"]
+#             The model's unembed weights for the logit lens.
 
-        feature_idx: list[int] or None
-            The features we're actually computing. These might just be a subset of the model's full features.
+#         feature_idx: list[int] or None
+#             The features we're actually computing. These might just be a subset of the model's full features.
 
-        num_top_features: int
-            The number of top features to display in this view, for any given metric.
+#         num_top_features: int
+#             The number of top features to display in this view, for any given metric.
 
-    Returns:
-        scores_dict: dict[str, tuple[list[int], list[str]]]
-            A dictionary mapping keys like "act_quantile|'django' (0)" to a tuple of lists, where the first list is the
-            feature indices, and the second list is the string-formatted values of the scores.
+#     Returns:
+#         scores_dict: dict[str, tuple[list[int], list[str]]]
+#             A dictionary mapping keys like "act_quantile|'django' (0)" to a tuple of lists, where the first list is the
+#             feature indices, and the second list is the string-formatted values of the scores.
 
-    As well as returning this dictionary, this function will also set `FeatureData.prompt_data` for each feature in
-    `sae_vis_data` (this is necessary for getting the prompts in the prompt-centric vis). Note this design choice could
-    have been done differently (i.e. have this function return a list of the prompt data for each feature). I chose this
-    way because it means the FeatureData._get_html_data_prompt_centric can work fundamentally the same way as
-    FeatureData._get_html_data_feature_centric, rather than treating the prompt data object as a different kind of
-    component in the vis.
-    """
-    if feature_idx is None:
-        feature_idx = list(sae_vis_data.feature_data_dict.keys())
-    n_feats = len(feature_idx)
-    assert (
-        feature_resid_dir.shape[0] == n_feats
-    ), f"The number of features in feature_resid_dir ({feature_resid_dir.shape[0]}) does not match the number of feature indices ({n_feats})"
+#     As well as returning this dictionary, this function will also set `FeatureData.prompt_data` for each feature in
+#     `sae_vis_data` (this is necessary for getting the prompts in the prompt-centric vis). Note this design choice could
+#     have been done differently (i.e. have this function return a list of the prompt data for each feature). I chose this
+#     way because it means the FeatureData._get_html_data_prompt_centric can work fundamentally the same way as
+#     FeatureData._get_html_data_feature_centric, rather than treating the prompt data object as a different kind of
+#     component in the vis.
+#     """
+#     if feature_idx is None:
+#         feature_idx = list(sae_vis_data.feature_data_dict.keys())
+#     n_feats = len(feature_idx)
+#     assert (
+#         feature_resid_dir.shape[0] == n_feats
+#     ), f"The number of features in feature_resid_dir ({feature_resid_dir.shape[0]}) does not match the number of feature indices ({n_feats})"
 
-    assert (
-        feat_acts.shape[1] == n_feats
-    ), f"The number of features in feat_acts ({feat_acts.shape[1]}) does not match the number of feature indices ({n_feats})"
+#     assert (
+#         feat_acts.shape[1] == n_feats
+#     ), f"The number of features in feat_acts ({feat_acts.shape[1]}) does not match the number of feature indices ({n_feats})"
 
-    feats_loss_contribution = torch.empty(
-        size=(n_feats, tokens.shape[1] - 1), device=device
-    )
-    # Some logit computations which we only need to do once
-    # correct_token_unembeddings = model_wrapped.W_U[:, tokens[0, 1:]] # [d_model seq]
-    orig_logits = (
-        resid_post / resid_post.std(dim=-1, keepdim=True)
-    ) @ W_U  # [seq d_vocab]
-    raw_logits = feature_resid_dir @ W_U  # [feats d_vocab]
+#     feats_loss_contribution = torch.empty(
+#         size=(n_feats, tokens.shape[1] - 1), device=device
+#     )
+#     # Some logit computations which we only need to do once
+#     # correct_token_unembeddings = model_wrapped.W_U[:, tokens[0, 1:]] # [d_model seq]
+#     orig_logits = (
+#         resid_post / resid_post.std(dim=-1, keepdim=True)
+#     ) @ W_U  # [seq d_vocab]
+#     raw_logits = feature_resid_dir @ W_U  # [feats d_vocab]
 
-    for i, feat in enumerate(feature_idx):
-        # ! Calculate the sequence data for each feature, and store it as FeatureData.prompt_data
+#     for i, feat in enumerate(feature_idx):
+#         # ! Calculate the sequence data for each feature, and store it as FeatureData.prompt_data
 
-        # Get this feature's output vector, using an outer product over the feature activations for all tokens
-        resid_post_feature_effect = einops.einsum(
-            feat_acts[:, i], feature_resid_dir[i], "seq, d_model -> seq d_model"
-        )
+#         # Get this feature's output vector, using an outer product over the feature activations for all tokens
+#         resid_post_feature_effect = einops.einsum(
+#             feat_acts[:, i], feature_resid_dir[i], "seq, d_model -> seq d_model"
+#         )
 
-        # Ablate the output vector from the residual stream, and get logits post-ablation
-        new_resid_post = resid_post - resid_post_feature_effect
-        new_logits = (new_resid_post / new_resid_post.std(dim=-1, keepdim=True)) @ W_U
+#         # Ablate the output vector from the residual stream, and get logits post-ablation
+#         new_resid_post = resid_post - resid_post_feature_effect
+#         new_logits = (new_resid_post / new_resid_post.std(dim=-1, keepdim=True)) @ W_U
 
-        # Get the top5 & bottom5 changes in logits (don't bother with `efficient_topk` cause it's small)
-        contribution_to_logprobs = orig_logits.log_softmax(
-            dim=-1
-        ) - new_logits.log_softmax(dim=-1)
-        top_contribution_to_logits = TopK(contribution_to_logprobs[:-1], k=5)
-        bottom_contribution_to_logits = TopK(
-            contribution_to_logprobs[:-1], k=5, largest=False
-        )
+#         # Get the top5 & bottom5 changes in logits (don't bother with `efficient_topk` cause it's small)
+#         contribution_to_logprobs = orig_logits.log_softmax(
+#             dim=-1
+#         ) - new_logits.log_softmax(dim=-1)
+#         top_contribution_to_logits = TopK(contribution_to_logprobs[:-1], k=5)
+#         bottom_contribution_to_logits = TopK(
+#             contribution_to_logprobs[:-1], k=5, largest=False
+#         )
 
-        # Get the change in loss (which is negative of change of logprobs for correct token)
-        loss_contribution = eindex(
-            -contribution_to_logprobs[:-1], tokens[0, 1:], "seq [seq]"
-        )
-        feats_loss_contribution[i, :] = loss_contribution
+#         # Get the change in loss (which is negative of change of logprobs for correct token)
+#         loss_contribution = eindex(
+#             -contribution_to_logprobs[:-1], tokens[0, 1:], "seq [seq]"
+#         )
+#         feats_loss_contribution[i, :] = loss_contribution
 
-        # Store the sequence data
-        sae_vis_data.feature_data_dict[feat].prompt_data = SequenceData(
-            token_ids=tokens.squeeze(0).tolist(),
-            feat_acts=[round(f, 4) for f in feat_acts[:, i].tolist()],
-            loss_contribution=[0.0] + loss_contribution.tolist(),
-            token_logits=raw_logits[i, tokens.squeeze(0)].tolist(),
-            top_token_ids=top_contribution_to_logits.indices.tolist(),
-            top_logits=top_contribution_to_logits.values.tolist(),
-            bottom_token_ids=bottom_contribution_to_logits.indices.tolist(),
-            bottom_logits=bottom_contribution_to_logits.values.tolist(),
-        )
+#         # Store the sequence data
+#         sae_vis_data.feature_data_dict[feat].prompt_data = SequenceData(
+#             token_ids=tokens.squeeze(0).tolist(),
+#             feat_acts=[round(f, 4) for f in feat_acts[:, i].tolist()],
+#             loss_contribution=[0.0] + loss_contribution.tolist(),
+#             token_logits=raw_logits[i, tokens.squeeze(0)].tolist(),
+#             top_token_ids=top_contribution_to_logits.indices.tolist(),
+#             top_logits=top_contribution_to_logits.values.tolist(),
+#             bottom_token_ids=bottom_contribution_to_logits.indices.tolist(),
+#             bottom_logits=bottom_contribution_to_logits.values.tolist(),
+#         )
 
-    # ! Lastly, return a dictionary mapping each key like 'act_quantile|"django" (0)' to a list of feature indices & scores
+#     # ! Lastly, return a dictionary mapping each key like 'act_quantile|"django" (0)' to a list of feature indices & scores
 
-    # Get a dict with keys like f"act_quantile|'My' (1)" and values (feature indices list, feature score values list)
-    scores_dict: dict[str, tuple[list[int], list[str]]] = {}
+#     # Get a dict with keys like f"act_quantile|'My' (1)" and values (feature indices list, feature score values list)
+#     scores_dict: dict[str, tuple[list[int], list[str]]] = {}
 
-    for seq_pos, seq_key in enumerate([f"{t!r} ({i})" for i, t in enumerate(str_toks)]):
-        # Filter the feature activations, since we only need the ones that are non-zero
-        feat_acts_nonzero_filter = utils.to_numpy(feat_acts[seq_pos] > 0)
-        feat_acts_nonzero_locations = np.nonzero(feat_acts_nonzero_filter)[0].tolist()
-        _feat_acts = feat_acts[seq_pos, feat_acts_nonzero_filter]  # [feats_filtered,]
-        _feature_idx = np.array(feature_idx)[feat_acts_nonzero_filter]
+#     for seq_pos, seq_key in enumerate([f"{t!r} ({i})" for i, t in enumerate(str_toks)]):
+#         # Filter the feature activations, since we only need the ones that are non-zero
+#         feat_acts_nonzero_filter = utils.to_numpy(feat_acts[seq_pos] > 0)
+#         feat_acts_nonzero_locations = np.nonzero(feat_acts_nonzero_filter)[0].tolist()
+#         _feat_acts = feat_acts[seq_pos, feat_acts_nonzero_filter]  # [feats_filtered,]
+#         _feature_idx = np.array(feature_idx)[feat_acts_nonzero_filter]
 
-        if feat_acts_nonzero_filter.sum() > 0:
-            k = min(num_top_features, _feat_acts.numel())
+#         if feat_acts_nonzero_filter.sum() > 0:
+#             k = min(num_top_features, _feat_acts.numel())
 
-            # Get the top features by activation size. This is just applying a TopK function to the feat acts (which
-            # were stored by the code before this). The feat acts are formatted to 3dp.
-            act_size_topk = TopK(_feat_acts, k=k, largest=True)
-            top_features = _feature_idx[act_size_topk.indices].tolist()
-            formatted_scores = [f"{v:.3f}" for v in act_size_topk.values]
-            scores_dict[f"act_size|{seq_key}"] = (top_features, formatted_scores)
+#             # Get the top features by activation size. This is just applying a TopK function to the feat acts (which
+#             # were stored by the code before this). The feat acts are formatted to 3dp.
+#             act_size_topk = TopK(_feat_acts, k=k, largest=True)
+#             top_features = _feature_idx[act_size_topk.indices].tolist()
+#             formatted_scores = [f"{v:.3f}" for v in act_size_topk.values]
+#             scores_dict[f"act_size|{seq_key}"] = (top_features, formatted_scores)
 
-            # Get the top features by activation quantile. We do this using the `feature_act_quantiles` object, which
-            # was stored `sae_vis_data`. This quantiles object has a method to return quantiles for a given set of
-            # data, as well as the precision (we make the precision higher for quantiles closer to 100%, because these
-            # are usually the quantiles we're interested in, and it lets us to save space in `feature_act_quantiles`).
-            act_quantile, act_precision = sae_vis_data.feature_stats.get_quantile(
-                _feat_acts, feat_acts_nonzero_locations
-            )
-            act_quantile_topk = TopK(act_quantile, k=k, largest=True)
-            act_formatting = [
-                f".{act_precision[i]-2}%" for i in act_quantile_topk.indices
-            ]
-            top_features = _feature_idx[act_quantile_topk.indices].tolist()
-            formatted_scores = [
-                f"{v:{f}}" for v, f in zip(act_quantile_topk.values, act_formatting)
-            ]
-            scores_dict[f"act_quantile|{seq_key}"] = (top_features, formatted_scores)
+#             # Get the top features by activation quantile. We do this using the `feature_act_quantiles` object, which
+#             # was stored `sae_vis_data`. This quantiles object has a method to return quantiles for a given set of
+#             # data, as well as the precision (we make the precision higher for quantiles closer to 100%, because these
+#             # are usually the quantiles we're interested in, and it lets us to save space in `feature_act_quantiles`).
+#             act_quantile, act_precision = sae_vis_data.feature_stats.get_quantile(
+#                 _feat_acts, feat_acts_nonzero_locations
+#             )
+#             act_quantile_topk = TopK(act_quantile, k=k, largest=True)
+#             act_formatting = [
+#                 f".{act_precision[i]-2}%" for i in act_quantile_topk.indices
+#             ]
+#             top_features = _feature_idx[act_quantile_topk.indices].tolist()
+#             formatted_scores = [
+#                 f"{v:{f}}" for v, f in zip(act_quantile_topk.values, act_formatting)
+#             ]
+#             scores_dict[f"act_quantile|{seq_key}"] = (top_features, formatted_scores)
 
-        # We don't measure loss effect on the first token
-        if seq_pos == 0:
-            continue
+#         # We don't measure loss effect on the first token
+#         if seq_pos == 0:
+#             continue
 
-        # Filter the loss effects, since we only need the ones which have non-zero feature acts on the tokens before them
-        prev_feat_acts_nonzero_filter = utils.to_numpy(feat_acts[seq_pos - 1] > 0)
-        _loss_contribution = feats_loss_contribution[
-            prev_feat_acts_nonzero_filter, seq_pos - 1
-        ]  # [feats_filtered,]
-        _feature_idx_prev = np.array(feature_idx)[prev_feat_acts_nonzero_filter]
+#         # Filter the loss effects, since we only need the ones which have non-zero feature acts on the tokens before them
+#         prev_feat_acts_nonzero_filter = utils.to_numpy(feat_acts[seq_pos - 1] > 0)
+#         _loss_contribution = feats_loss_contribution[
+#             prev_feat_acts_nonzero_filter, seq_pos - 1
+#         ]  # [feats_filtered,]
+#         _feature_idx_prev = np.array(feature_idx)[prev_feat_acts_nonzero_filter]
 
-        if prev_feat_acts_nonzero_filter.sum() > 0:
-            k = min(num_top_features, _loss_contribution.numel())
+#         if prev_feat_acts_nonzero_filter.sum() > 0:
+#             k = min(num_top_features, _loss_contribution.numel())
 
-            # Get the top features by loss effect. This is just applying a TopK function to the loss effects (which were
-            # stored by the code before this). The loss effects are formatted to 3dp. We look for the most negative
-            # values, i.e. the most loss-reducing features.
-            loss_contribution_topk = TopK(_loss_contribution, k=k, largest=False)
-            top_features = _feature_idx_prev[loss_contribution_topk.indices].tolist()
-            formatted_scores = [f"{v:+.3f}" for v in loss_contribution_topk.values]
-            scores_dict[f"loss_effect|{seq_key}"] = (top_features, formatted_scores)
-    return scores_dict
+#             # Get the top features by loss effect. This is just applying a TopK function to the loss effects (which were
+#             # stored by the code before this). The loss effects are formatted to 3dp. We look for the most negative
+#             # values, i.e. the most loss-reducing features.
+#             loss_contribution_topk = TopK(_loss_contribution, k=k, largest=False)
+#             top_features = _feature_idx_prev[loss_contribution_topk.indices].tolist()
+#             formatted_scores = [f"{v:+.3f}" for v in loss_contribution_topk.values]
+#             scores_dict[f"loss_effect|{seq_key}"] = (top_features, formatted_scores)
+#     return scores_dict
 
 
-@torch.inference_mode()
-def get_prompt_data(
-    sae_vis_data: SaeVisData,
-    prompt: str,
-    num_top_features: int,
-) -> dict[str, tuple[list[int], list[str]]]:
-    """
-    Gets data that will be used to create the sequences in the prompt-centric HTML visualisation, i.e. an object of
-    type SequenceData for each of our features.
+# @torch.inference_mode()
+# def get_prompt_data(
+#     sae_vis_data: SaeVisData,
+#     prompt: str,
+#     num_top_features: int,
+# ) -> dict[str, tuple[list[int], list[str]]]:
+#     """
+#     Gets data that will be used to create the sequences in the prompt-centric HTML visualisation, i.e. an object of
+#     type SequenceData for each of our features.
 
-    Args:
-        sae_vis_data:     The object storing all data for each feature. We'll set each `feature_data.prompt_data` to the
-                          data we get from `prompt`.
-        prompt:           The prompt we'll be using to get the feature activations.#
-        num_top_features: The number of top features we'll be getting data for.
+#     Args:
+#         sae_vis_data:     The object storing all data for each feature. We'll set each `feature_data.prompt_data` to the
+#                           data we get from `prompt`.
+#         prompt:           The prompt we'll be using to get the feature activations.#
+#         num_top_features: The number of top features we'll be getting data for.
 
-    Returns:
-        scores_dict:      A dictionary mapping keys like "act_quantile|0" to a tuple of lists, where the first list is
-                          the feature indices, and the second list is the string-formatted values of the scores.
+#     Returns:
+#         scores_dict:      A dictionary mapping keys like "act_quantile|0" to a tuple of lists, where the first list is
+#                           the feature indices, and the second list is the string-formatted values of the scores.
 
-    As well as returning this dictionary, this function will also set `FeatureData.prompt_data` for each feature in
-    `sae_vis_data`. This is because the prompt-centric vis will call `FeatureData._get_html_data_prompt_centric` on each
-    feature data object, so it's useful to have all the data in once place! Even if this will get overwritten next
-    time we call `get_prompt_data` for this same `sae_vis_data` object.
-    """
+#     As well as returning this dictionary, this function will also set `FeatureData.prompt_data` for each feature in
+#     `sae_vis_data`. This is because the prompt-centric vis will call `FeatureData._get_html_data_prompt_centric` on each
+#     feature data object, so it's useful to have all the data in once place! Even if this will get overwritten next
+#     time we call `get_prompt_data` for this same `sae_vis_data` object.
+#     """
 
-    # ! Boring setup code
-    feature_idx = list(sae_vis_data.feature_data_dict.keys())
-    encoder = sae_vis_data.encoder
-    assert isinstance(encoder, CrossCoder_vis)
-    model = sae_vis_data.model
-    assert isinstance(model, HookedTransformer)
-    cfg = sae_vis_data.cfg
-    assert isinstance(cfg.hook_point, str), f"{cfg.hook_point=}, expected a string"
+#     # ! Boring setup code
+#     feature_idx = list(sae_vis_data.feature_data_dict.keys())
+#     encoder = sae_vis_data.encoder
+#     assert isinstance(encoder, CrossCoder_vis)
+#     model = sae_vis_data.model
+#     assert isinstance(model, LanguageModel)
+#     cfg = sae_vis_data.cfg
+#     assert isinstance(cfg.hook_layer, int), f"{cfg.hook_layer=}, expected an integer"
 
-    str_toks: list[str] = model.tokenizer.tokenize(prompt)  # type: ignore
-    tokens = model.tokenizer.encode(prompt, return_tensors="pt").to(device)  # type: ignore
-    assert isinstance(tokens, torch.Tensor)
+#     str_toks: list[str] = model.tokenizer.tokenize(prompt)  # type: ignore
+#     tokens = model.tokenizer.encode(prompt, return_tensors="pt").to(device)  # type: ignore
+#     assert isinstance(tokens, torch.Tensor)
 
-    model_wrapped = LanguageModelWrapper(model, cfg.hook_point)
+#     model_wrapped = LanguageModelWrapper(model, cfg.hook_layer)
 
-    feature_act_dir = encoder.W_enc[:, feature_idx]  # [d_in feats]
-    feature_out_dir = encoder.W_dec[feature_idx]  # [feats d_in]
-    feature_resid_dir = to_resid_dir(feature_out_dir, model_wrapped)  # [feats d_model]
-    assert (
-        feature_act_dir.T.shape
-        == feature_out_dir.shape
-        == (len(feature_idx), encoder.cfg.d_in)
-    )
+#     feature_act_dir = encoder.W_enc[:, feature_idx]  # [d_in feats]
+#     feature_out_dir = encoder.W_dec[feature_idx]  # [feats d_in]
+#     feature_resid_dir = to_resid_dir(feature_out_dir, model_wrapped)  # [feats d_model]
+#     assert (
+#         feature_act_dir.T.shape
+#         == feature_out_dir.shape
+#         == (len(feature_idx), encoder.cfg.d_in)
+#     )
 
-    # ! Define hook functions to cache all the info required for feature ablation, then run those hook fns
+#     # ! Define hook functions to cache all the info required for feature ablation, then run those hook fns
 
-    resid_post, act_post = model_wrapped(tokens, return_logits=False)
-    resid_post: Tensor = resid_post.squeeze(0)
-    feat_acts = compute_feat_acts(act_post, feature_idx, encoder).squeeze(
-        0
-    )  # [seq feats]
+#     resid_post, act_post = model_wrapped(tokens, return_logits=False)
+#     resid_post: Tensor = resid_post.squeeze(0)
+#     feat_acts = compute_feat_acts(act_post, feature_idx, encoder).squeeze(
+#         0
+#     )  # [seq feats]
 
-    # ! Use the data we've collected to make the scores_dict and update the sae_vis_data
-    scores_dict = parse_prompt_data(
-        tokens=tokens,
-        str_toks=str_toks,
-        sae_vis_data=sae_vis_data,
-        feat_acts=feat_acts,
-        feature_resid_dir=feature_resid_dir,
-        resid_post=resid_post,
-        W_U=model.W_U,
-        feature_idx=feature_idx,
-        num_top_features=num_top_features,
-    )
+#     # ! Use the data we've collected to make the scores_dict and update the sae_vis_data
+#     scores_dict = parse_prompt_data(
+#         tokens=tokens,
+#         str_toks=str_toks,
+#         sae_vis_data=sae_vis_data,
+#         feat_acts=feat_acts,
+#         feature_resid_dir=feature_resid_dir,
+#         resid_post=resid_post,
+#         W_U=model.W_U,
+#         feature_idx=feature_idx,
+#         num_top_features=num_top_features,
+#     )
 
-    return scores_dict
+#     return scores_dict
