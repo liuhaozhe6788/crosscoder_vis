@@ -20,7 +20,7 @@ base_model = LanguageModel('mistralai/Mistral-7B-Instruct-v0.3', device_map='cud
 chat_model = LanguageModel('liuhaozhe6788/mistralai_Mistral-7B-Instruct-v0.3-FinQA-lora', device_map='cuda:0', dtype=torch.bfloat16)
 
 def prepare_text_data():
-    data = pd.read_csv("../data/finqa_test_generated_filtered.csv")
+    data = pd.read_csv("data/finqa_test_generated_filtered.csv")
     full_text_data = data.apply(lambda x: x["prompt"] + x["generated_code"], axis=1)
 
     all_text_data = full_text_data.tolist()
@@ -151,7 +151,7 @@ class CrossCoder_demo(nn.Module):
     @classmethod
     def load_from_hf(
         cls,
-        repo_id: str = "liuhaozhe6788/crosscoder-model-diff-mistral-7b-instruct-v0.3_finQA_lora",
+        repo_id: str = "liuhaozhe6788/crosscoder-model-diff-mistral-7b-instruct-v0.3_finQA_lora_topk_100",
         device: Optional[Union[str, torch.device]] = None
     ) -> "CrossCoder_demo":
         """

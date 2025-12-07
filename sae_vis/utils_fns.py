@@ -20,7 +20,6 @@ from eindex import eindex
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 from tqdm import tqdm
-from transformer_lens import utils
 from transformers import PreTrainedTokenizerBase
 
 T = TypeVar("T")
@@ -379,7 +378,7 @@ class TopK:
         if tensor_mask is None or not tensor_mask.any():
             k = min(self.k, tensor.shape[-1])
             topk = tensor.topk(k=k, largest=self.largest)
-            return utils.to_numpy(topk.values.float()), utils.to_numpy(topk.indices)
+            return topk.values.float().cpu().numpy(), topk.indices.cpu().numpy()
 
         tensor = tensor.float() # deal with bfloat16
         
@@ -401,7 +400,7 @@ class TopK:
         topk_values = torch.zeros(topk_shape).to(tensor.device)  # shape [... k]
         topk_values[tensor_mask] = topk.values
 
-        return utils.to_numpy(topk_values), utils.to_numpy(topk_indices)
+        return topk_values.cpu().numpy(), topk_indices.cpu().numpy()
 
 
 def merge_lists(*lists: Iterable[T]) -> list[T]:
