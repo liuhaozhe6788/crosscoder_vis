@@ -42,8 +42,8 @@ function setupLogitTablesB(logitsTableId, tablesData, tableMetaData) {
 
 // Define metadata for Model B tables
 const logitTablesMetaDataB = [
-    {title: "CHAT NEGATIVE LOGITS", dataKey: "negLogits", class: "negative"},
-    {title: "CHAT POSITIVE LOGITS", dataKey: "posLogits", class: "positive"},
+    {title: "FINETUNED NEGATIVE LOGITS", dataKey: "negLogits", class: "negative"},
+    {title: "FINETUNED POSITIVE LOGITS", dataKey: "posLogits", class: "positive"},
 ];
 
 // Create Model B tables

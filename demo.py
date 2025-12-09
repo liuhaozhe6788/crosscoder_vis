@@ -2,18 +2,14 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from typing import Optional, Union
-from huggingface_hub import hf_hub_download, login
+from huggingface_hub import hf_hub_download
 import json
 import einops
-import os
 from typing import NamedTuple
 from sae_vis.data_config_classes import SaeVisConfig
 from nnsight import LanguageModel
 import pandas as pd
 
-
-HF_TOKEN = os.getenv("HF_TOKEN")
-login(HF_TOKEN)
 torch.set_grad_enabled(False)
 
 base_model = LanguageModel('mistralai/Mistral-7B-Instruct-v0.3', device_map='cuda:0', dtype=torch.bfloat16)
@@ -33,6 +29,17 @@ from sae_vis.model_fns import CrossCoderConfig, CrossCoder_vis
 
 base_estimated_scaling_factor = 27.489933013916016
 chat_estimated_scaling_factor = 27.12582778930664
+
+DTYPES = {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16}
+
+class LossOutput(NamedTuple):
+    # loss: torch.Tensor
+    l2_loss: torch.Tensor
+    l1_loss: torch.Tensor
+    l0_loss: torch.Tensor
+    explained_variance: torch.Tensor
+    explained_variance_A: torch.Tensor
+    explained_variance_B: torch.Tensor
 
 DTYPES = {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16}
 
@@ -101,6 +108,7 @@ class CrossCoder_demo(nn.Module):
             acts = F.relu(x_enc + self.b_enc)
         else:
             acts = x_enc + self.b_enc
+        acts = self.mask_acts_batchtopk(acts)
         return acts
 
     def decode(self, acts):
@@ -117,11 +125,23 @@ class CrossCoder_demo(nn.Module):
         acts = self.encode(x)
         return self.decode(acts)
 
+    def mask_acts_batchtopk(self, acts):
+        # acts: [batch, d_hidden]
+        if self.cfg["batch_topk"] is not None:
+            # Get topk across the whole batch
+            acts_flat = acts.flatten()
+            _, topk_indices = torch.topk(acts_flat, k=self.cfg["batch_topk"] * acts.shape[0], dim=-1)
+            # Create a boolean mask from the indices
+            mask_flat = torch.zeros_like(acts_flat, dtype=torch.bool)
+            mask_flat[topk_indices] = True
+            mask = mask_flat.reshape_as(acts)
+            acts = torch.where(mask, acts, 0)
+        return acts
+
     def get_losses(self, x):
         # x: [batch, n_models, d_model]
         x = x.to(self.dtype)
         acts = self.encode(x)
-        # acts: [batch, d_hidden]
         x_reconstruct = self.decode(acts)
         diff = x_reconstruct.float() - x.float()
         squared_diff = diff.pow(2)
@@ -212,12 +232,12 @@ def fold_activation_scaling_factor(cross_coder, base_scaling_factor, chat_scalin
 
 folded_cross_coder = fold_activation_scaling_factor(folded_cross_coder, base_estimated_scaling_factor, chat_estimated_scaling_factor)
 
-encoder_cfg = CrossCoderConfig(d_in=base_model.config.hidden_size, d_hidden=cross_coder.cfg["dict_size"], apply_b_dec_to_input=False)
+encoder_cfg = CrossCoderConfig(d_in=base_model.config.hidden_size, d_hidden=cross_coder.cfg["dict_size"], apply_b_dec_to_input=False, batch_topk=cross_coder.cfg["batch_topk"])
 sae_vis_cross_coder = CrossCoder_vis(encoder_cfg)
 sae_vis_cross_coder.load_state_dict(folded_cross_coder.state_dict())
 sae_vis_cross_coder = sae_vis_cross_coder.to("cuda:0")
 sae_vis_cross_coder = sae_vis_cross_coder.to(torch.bfloat16)
-test_feature_idx = [2325,12698,15]
+test_feature_idx = [3086]
 sae_vis_config = SaeVisConfig(
     hook_layer = 16,
     features = test_feature_idx,

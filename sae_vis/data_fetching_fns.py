@@ -99,6 +99,8 @@ def compute_feat_acts(
     )
     feat_acts = F.relu(feat_acts_pre + feature_bias)
 
+    feat_acts = encoder.mask_acts_batchtopk(feat_acts)
+
     # Update the CorrCoef object between feature activation & neurons
     if corrcoef_neurons is not None:
         corrcoef_neurons.update(
@@ -125,7 +127,7 @@ def compute_feat_acts(
             "batch seq d_in, d_in d_hidden -> batch seq d_hidden",
         )
         feat_acts_B = F.relu(feat_acts_pre_B + encoder_B.b_enc)
-
+        feat_acts_B = encoder_B.mask_acts_batchtopk(feat_acts_B)
         # Update the CorrCoef object between feature activation & encoder-B features
         corrcoef_encoder_B.update(
             einops.rearrange(feat_acts, "batch seq feats -> feats (batch seq)"),
@@ -274,7 +276,7 @@ def parse_feature_data(
 
             relative_decoder_strength = torch.cat([relative_decoder_strength_base, relative_decoder_strength_chat], dim=1) # [feats 2]
             feature_tables_data.update(
-                relative_decoder_strength_indices=[["Base", "Chat"] for _ in range(len(feature_indices))], # TODO: maybe make this more general
+                relative_decoder_strength_indices=[["Base", "Finetuned"] for _ in range(len(feature_indices))], # TODO: maybe make this more general
                 relative_decoder_strength_values=relative_decoder_strength.tolist(), # [feats 2]
             )
             

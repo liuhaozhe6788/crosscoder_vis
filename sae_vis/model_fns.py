@@ -21,7 +21,7 @@ class CrossCoderConfig:
     dict_mult: int | None = None
 
     l1_coeff: float = 3e-4
-
+    batch_topk: int | None = None
     apply_b_dec_to_input: bool = False
 
     def __post_init__(self):
@@ -62,6 +62,7 @@ class CrossCoder_vis(nn.Module):
             "... n_layers d_model, n_layers d_model d_hidden -> ... d_hidden",
         )
         acts = F.relu(x_enc + self.b_enc)
+        acts = self.mask_acts_batchtopk(acts)
         #x_reconstruct = acts @ self.W_dec + self.b_dec
         x_reconstruct = einops.einsum(
             acts,
@@ -79,6 +80,19 @@ class CrossCoder_vis(nn.Module):
         l1_loss = (acts * total_decoder_norm[None, :]).sum(-1).mean(0)
         loss = l2_loss + l1_loss
         return loss, x_reconstruct, acts, l2_loss, l1_loss
+
+    def mask_acts_batchtopk(self, acts: torch.Tensor):
+        # acts: [batch, d_hidden]
+        if self.cfg.batch_topk is not None:
+            # Get topk across the whole batch
+            acts_flat = acts.flatten()
+            _, topk_indices = torch.topk(acts_flat, k=self.cfg.batch_topk * acts.shape[0], dim=-1)
+            # Create a boolean mask from the indices
+            mask_flat = torch.zeros_like(acts_flat, dtype=torch.bool)
+            mask_flat[topk_indices] = True
+            mask = mask_flat.reshape_as(acts)
+            acts = torch.where(mask, acts, 0)
+        return acts
 
     @torch.no_grad()
     def remove_parallel_component_of_grads(self):
